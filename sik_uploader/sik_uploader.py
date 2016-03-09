@@ -194,7 +194,11 @@ class uploader(object):
 
     def autosync(self):
         '''use AT&UPDATE to put modem in update mode'''
+<<<<<<< HEAD
         import fdpexpect, time, pexpect
+=======
+        import fdpexpect, time , pexpect
+>>>>>>> 181b0a5b712054d9d39e89a3ff2b4f68b22f5e7a
         ser = fdpexpect.fdspawn(self.port.fileno(), logfile=sys.stdout)
         if self.atbaudrate != 115200:
             self.port.setBaudrate(self.atbaudrate)

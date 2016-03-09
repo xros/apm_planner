@@ -48,7 +48,9 @@ This file is part of the QGROUNDCONTROL project
 #include "UASControlWidget.h"
 #include "UASInfoWidget.h"
 #include "WaypointList.h"
+#if (defined ENABLE_CAMRAVIW)
 #include "CameraView.h"
+#endif // ENABLE_CAMRAVIW
 #include "UASListWidget.h"
 //#include "MAVLinkProtocol.h"
 #include "MAVLinkSimulationLink.h"
@@ -66,7 +68,7 @@ This file is part of the QGROUNDCONTROL project
 #include "WatchdogControl.h"
 #include "HSIDisplay.h"
 #include "opmapcontrol.h"
-#if (defined Q_OS_MAC) | (defined _MSC_VER)
+#if (defined GOGGLEEARTH) && ((defined Q_OS_MAC) | (defined _MSC_VER))
 #include "QGCGoogleEarthView.h"
 #endif
 #include "QGCToolBar.h"
@@ -90,7 +92,6 @@ class QGCMAVLinkMessageSender;
 class QGCFirmwareUpdate;
 class QSplashScreen;
 class QGCStatusBar;
-class DroneshareDialog;
 
 /**
  * @brief Main Application Window
@@ -381,7 +382,7 @@ protected:
 #ifdef QGC_OSG_ENABLED
     QPointer<QWidget> q3DWidget;
 #endif
-#if (defined _MSC_VER) || (defined Q_OS_MAC)
+#if (defined GOOGLEEARTH) && ((defined _MSC_VER) || (defined Q_OS_MAC))
     QPointer<QGCGoogleEarthView> earthWidget;
 #endif
     QPointer<QGCFirmwareUpdate> firmwareUpdateWidget;
@@ -471,7 +472,6 @@ private slots:
     void autoUpdateCancelled(QString version);
     void showNoUpdateAvailDialog();
 
-    void showDroneshareDialog();
     void showTerminalConsole();
     void closeTerminalConsole();
 
@@ -492,7 +492,6 @@ private:
     AutoUpdateCheck m_autoUpdateCheck;
     AutoUpdateDialog* m_dialog;
 
-    DroneshareDialog* m_droneshareDialog;
     QDialog* m_terminalDialog;
 
 };
