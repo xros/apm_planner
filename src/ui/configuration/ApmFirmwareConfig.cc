@@ -36,7 +36,6 @@ This file is part of the APM_PLANNER project
 static const QString DEFAULT_FIRMWARE_TYPE = "stable";
 static const QString DEFAULT_AUTOPILOT_HW_TYPE = "";
 
-
 ApmFirmwareConfig::ApmFirmwareConfig(QWidget *parent) : AP2ConfigWidget(parent),
     m_throwPropSpinWarning(false),
     m_replugRequestMessageBox(0),
@@ -384,7 +383,7 @@ void ApmFirmwareConfig::addButtonStyleSheet(QWidget *parent)
 void ApmFirmwareConfig::requestFirmwares(QString type,QString autopilot, bool notification = false)
 {
     //type can be "stable" "beta" or "latest"
-    //autopilot can be "apm" "px4" or "pixhawk"
+    //autopilot can be "apm" "px4", "px4-v2" or "px4-v4"
     //or "aerocore"
     QLOG_DEBUG() << "Requesting firmware:" << type << autopilot;
     m_betaFirmwareChecked = false;
@@ -392,6 +391,8 @@ void ApmFirmwareConfig::requestFirmwares(QString type,QString autopilot, bool no
     m_notificationOfUpdate = notification;
     hideBetaLabels();
     QString prestring = "apm2";
+    QString poststring = "";
+
     if (autopilot == "apm")
     {
         prestring = "apm2";
@@ -399,14 +400,21 @@ void ApmFirmwareConfig::requestFirmwares(QString type,QString autopilot, bool no
     else if (autopilot == "px4")
     {
         prestring = "PX4";
+        poststring = "-v1";
     }
-    else if (autopilot == "pixhawk")
+    else if (autopilot == "px4-v2")
     {
         prestring = "PX4";
+        poststring = "-v2";
+    }
+    else if (autopilot == "px4-v4")
+    {
+        prestring = "PX4";
+        poststring = "-v4";
     }
     else if (autopilot == "aerocore")
     {
-	prestring = "PX4";
+        prestring = "PX4";
     }
     if (type != "stable")
     {
@@ -488,17 +496,17 @@ void ApmFirmwareConfig::requestFirmwares(QString type,QString autopilot, bool no
 
         }
     }
-    else if (autopilot == "px4")
+    else if ((autopilot == "px4") || (autopilot == "px4-v2") || (autopilot == "px4-v4"))
     {
-        m_buttonToUrlMap[ui.roverPushButton] = "http://firmware.diydrones.com/Rover/" + type + "/" + prestring + "/APMrover2-v1.px4";
-        m_buttonToUrlMap[ui.planePushButton] = "http://firmware.diydrones.com/Plane/" + type + "/" + prestring + "/ArduPlane-v1.px4";
-        m_buttonToUrlMap[ui.copterPushButton] = "http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-heli/ArduCopter-v1.px4";
-        m_buttonToUrlMap[ui.hexaPushButton] = "http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-hexa/ArduCopter-v1.px4";
-        m_buttonToUrlMap[ui.octaQuadPushButton] = "http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-octa-quad/ArduCopter-v1.px4";
-        m_buttonToUrlMap[ui.octaPushButton] = "http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-octa/ArduCopter-v1.px4";
-        m_buttonToUrlMap[ui.quadPushButton] = "http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-quad/ArduCopter-v1.px4";
-        m_buttonToUrlMap[ui.triPushButton] = "http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-tri/ArduCopter-v1.px4";
-        m_buttonToUrlMap[ui.y6PushButton] = "http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-y6/ArduCopter-v1.px4";
+        m_buttonToUrlMap[ui.roverPushButton] = "http://firmware.diydrones.com/Rover/" + type + "/" + prestring + "/APMrover2" + poststring + ".px4";
+        m_buttonToUrlMap[ui.planePushButton] = "http://firmware.diydrones.com/Plane/" + type + "/" + prestring + "/ArduPlane" + poststring + ".px4";
+        m_buttonToUrlMap[ui.copterPushButton] = "http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-heli/ArduCopter" + poststring + ".px4";
+        m_buttonToUrlMap[ui.hexaPushButton] = "http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-hexa/ArduCopter" + poststring + ".px4";
+        m_buttonToUrlMap[ui.octaQuadPushButton] = "http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-octa-quad/ArduCopter" + poststring + ".px4";
+        m_buttonToUrlMap[ui.octaPushButton] = "http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-octa/ArduCopter" + poststring + ".px4";
+        m_buttonToUrlMap[ui.quadPushButton] = "http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-quad/ArduCopter" + poststring + ".px4";
+        m_buttonToUrlMap[ui.triPushButton] = "http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-tri/ArduCopter" + poststring + ".px4";
+        m_buttonToUrlMap[ui.y6PushButton] = "http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-y6/ArduCopter" + poststring + ".px4";
 
         reply1 = m_networkManager->get(QNetworkRequest(QUrl("http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-heli/git-version.txt")));
         reply2 = m_networkManager->get(QNetworkRequest(QUrl("http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-quad/git-version.txt")));
@@ -507,29 +515,6 @@ void ApmFirmwareConfig::requestFirmwares(QString type,QString autopilot, bool no
         reply5 = m_networkManager->get(QNetworkRequest(QUrl("http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-octa-quad/git-version.txt")));
         reply6 = m_networkManager->get(QNetworkRequest(QUrl("http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-tri/git-version.txt")));
         reply7 = m_networkManager->get(QNetworkRequest(QUrl("http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-y6/git-version.txt")));
-
-
-    }
-    else if (autopilot == "pixhawk")
-    {
-        m_buttonToUrlMap[ui.roverPushButton] = "http://firmware.diydrones.com/Rover/" + type + "/" + prestring + "/APMrover2-v2.px4";
-        m_buttonToUrlMap[ui.planePushButton] = "http://firmware.diydrones.com/Plane/" + type + "/" + prestring + "/ArduPlane-v2.px4";
-        m_buttonToUrlMap[ui.copterPushButton] = "http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-heli/ArduCopter-v2.px4";
-        m_buttonToUrlMap[ui.hexaPushButton] = "http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-hexa/ArduCopter-v2.px4";
-        m_buttonToUrlMap[ui.octaQuadPushButton] = "http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-octa-quad/ArduCopter-v2.px4";
-        m_buttonToUrlMap[ui.octaPushButton] = "http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-octa/ArduCopter-v2.px4";
-        m_buttonToUrlMap[ui.quadPushButton] = "http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-quad/ArduCopter-v2.px4";
-        m_buttonToUrlMap[ui.triPushButton] = "http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-tri/ArduCopter-v2.px4";
-        m_buttonToUrlMap[ui.y6PushButton] = "http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-y6/ArduCopter-v2.px4";
-
-        reply1 = m_networkManager->get(QNetworkRequest(QUrl("http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-heli/git-version.txt")));
-        reply2 = m_networkManager->get(QNetworkRequest(QUrl("http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-quad/git-version.txt")));
-        reply3 = m_networkManager->get(QNetworkRequest(QUrl("http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-hexa/git-version.txt")));
-        reply4 = m_networkManager->get(QNetworkRequest(QUrl("http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-octa/git-version.txt")));
-        reply5 = m_networkManager->get(QNetworkRequest(QUrl("http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-octa-quad/git-version.txt")));
-        reply6 = m_networkManager->get(QNetworkRequest(QUrl("http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-tri/git-version.txt")));
-        reply7 = m_networkManager->get(QNetworkRequest(QUrl("http://firmware.diydrones.com/Copter/" + type + "/" + prestring + "-y6/git-version.txt")));
-
 
     }
     else if (autopilot == "aerocore")
@@ -724,7 +709,7 @@ void ApmFirmwareConfig::downloadFinished()
         m_arduinoUploader->loadFirmware(m_settings.name,filename);
 
     }
-    else if (m_autopilotType == "pixhawk" || m_autopilotType == "px4" || m_autopilotType == "aerocore")
+    else if ((m_autopilotType == "px4-v4" || m_autopilotType == "px4-v2" || m_autopilotType == "px4" || m_autopilotType == "aerocore"))
     {
         if (m_px4uploader)
         {
@@ -898,10 +883,15 @@ QString ApmFirmwareConfig::processPortInfo(const QSerialPortInfo &info)
         {
             return "px4";
         }
-        else if (info.productIdentifier() == 0x0011 || info.productIdentifier() == 0x0001
-                 || info.productIdentifier() == 0x0016) //0x0011 is the Pixhawk, 0x0001 is the bootloader.
+        else if ( info.productIdentifier() == 0x0012 || info.description().contains("FMU v4.x") ) // v4.x is Pixracer
         {
-            return "pixhawk";
+            return "px4-v4";
+        }
+        else if (info.productIdentifier() == 0x0011 || info.productIdentifier() == 0x0001
+                 || info.productIdentifier() == 0x0016 || info.description().contains("FMU v2.x")) //0x0011 is the Pixhawk, 0x0001 is the bootloader.
+        {
+            QLOG_DEBUG() << "Detected: " << info.description() << " :" << info.productIdentifier();
+            return "px4-v2";
         }
         else
         {
@@ -922,8 +912,10 @@ QString ApmFirmwareConfig::processPortInfo(const QSerialPortInfo &info)
 
 void ApmFirmwareConfig::firmwareListError(QNetworkReply::NetworkError error)
 {
-    QNetworkReply *reply = qobject_cast<QNetworkReply*>(sender());
-    QLOG_ERROR() << "Error!" << reply->errorString();
+    if (error != QNetworkReply::NoError) {
+        QNetworkReply *reply = qobject_cast<QNetworkReply*>(sender());
+        QLOG_ERROR() << "Error!" << reply->errorString();
+    }
 }
 
 bool ApmFirmwareConfig::stripVersionFromGitReply(QString url, QString reply,QString type,QString stable,QString *out)
@@ -954,7 +946,7 @@ void ApmFirmwareConfig::firmwareListFinished()
     {
         apmver = "apm2";
     }
-    else if (m_autopilotType == "px4" || m_autopilotType == "pixhawk")
+    else if (m_autopilotType == "px4" || m_autopilotType == "px4-v2" || m_autopilotType == "px4-v4")
     {
         apmver = "PX4";
     }
@@ -1059,8 +1051,8 @@ bool ApmFirmwareConfig::versionIsGreaterThan(QString verstr,double version)
 
 bool ApmFirmwareConfig::compareVersionStrings(const QString& newVersion, const QString& currentVersion)
 {
-    int newMajor,newMinor,newBuild = 0;
-    int currentMajor, currentMinor,currentBuild = 0;
+    int newMajor = 0, newMinor = 0, newBuild = 0;
+    int currentMajor = 0, currentMinor = 0,currentBuild = 0;
 
     QString newBuildSubMoniker, oldBuildSubMoniker; // holds if the build is a rc or dev build
 
@@ -1228,7 +1220,10 @@ void ApmFirmwareConfig::parameterChanged(int uas, int component, QString paramet
                 requestFirmwares(m_firmwareType,"px4",true);
             }break;
             case 5:{ //PX4v2
-                requestFirmwares(m_firmwareType,"pixhawk",true);
+                requestFirmwares(m_firmwareType,"px4-v2",true);
+            }break;
+            case 6:{ //PX4v4
+             requestFirmwares(m_firmwareType,"px4-v4",true);
             }break;
 
             default:

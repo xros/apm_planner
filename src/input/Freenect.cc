@@ -128,9 +128,17 @@ Freenect::init(int userDeviceNumber)
     }
 
     if (freenect_set_video_mode(device, FREENECT_VIDEO_RGB_MEDIUM) != 0) {
+<<<<<<< HEAD
         return false;
     }
     if (freenect_set_depth_mode(device, FREENECT_DEPTH_11_BIT_MEDIUM) != 0) {
+=======
+    //if (freenect_set_video_format(device, FREENECT_VIDEO_RGB) != 0) {
+        return false;
+    }
+    if (freenect_set_depth_mode(device, FREENECT_DEPTH_11_BIT_MEDIUM) != 0) {
+    //if (freenect_set_depth_format(device, FREENECT_DEPTH_11BIT) != 0) {
+>>>>>>> 181b0a5b712054d9d39e89a3ff2b4f68b22f5e7a
         return false;
     }
     freenect_set_video_callback(device, videoCallback);
