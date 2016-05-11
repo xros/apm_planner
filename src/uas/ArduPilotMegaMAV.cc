@@ -215,26 +215,30 @@ void ArduPilotMegaMAV::receiveMessage(LinkInterface* link, mavlink_message_t mes
 
             // Check is older APM and reset severity to correct MAVLINK spec.
             if (m_severityCompatibilityMode) {
-                 // Older APM detected, translate severity to MAVLink Standard severity
-                 // SEVERITY_LOW     =1 MAV_SEVERITY_WARNING = 4
-                 // SEVERITY_MEDIUM  =2 MAV_SEVERITY_ALERT   = 1
-                 // SEVERITY_HIGH    =3 MAV_SEVERITY_CRITICAL= 2
-                 switch (severity) {
-                     case 1: /*gcs_severity::SEVERITY_LOW:*/
-                         severity = MAV_SEVERITY_WARNING;
-                         break;
-                     case 2: /*gcs_severity::SEVERITY_MEDIUM*/
-                         severity = MAV_SEVERITY_ALERT;
-                         break;
-                     case 3: /*gcs_severity::SEVERITY_HIGH:*/
-                         severity = MAV_SEVERITY_CRITICAL;
-                         break;
-                     default:
-                         severity = MAV_SEVERITY_INFO;
-                         break;
-                 }
-                 // repack message for further down the stack.s
-                 mavlink_msg_statustext_pack(message.sysid,message.compid,&message,severity,b.data());
+                // Older APM detected, translate severity to MAVLink Standard severity
+                // SEVERITY_LOW     =1 MAV_SEVERITY_WARNING = 4
+                // SEVERITY_MEDIUM  =2 MAV_SEVERITY_ALERT   = 1
+                // SEVERITY_HIGH    =3 MAV_SEVERITY_CRITICAL= 2
+                // SEVERITY_USER_RESPONSE =5 MAV_SEVERITY_CRITICAL= 2
+                switch (severity) {
+                    case 1: /*gcs_severity::SEVERITY_LOW:*/
+                        severity = MAV_SEVERITY_WARNING;
+                        break;
+                    case 2: /*gcs_severity::SEVERITY_MEDIUM*/
+                        severity = MAV_SEVERITY_ALERT;
+                        break;
+                    case 3: /*gcs_severity::SEVERITY_HIGH:*/
+                        severity = MAV_SEVERITY_CRITICAL;
+                        break;
+                    case 5: /*gcs_severity::SEVERITY_USER_RESPONSE:*/
+                        severity = MAV_SEVERITY_CRITICAL;
+                        break;
+                    default:
+                        severity = MAV_SEVERITY_INFO;
+                        break;
+                }
+                // repack message for further down the stack.s
+                mavlink_msg_statustext_pack(message.sysid,message.compid,&message,severity,b.data());
 
              }
 
@@ -394,24 +398,22 @@ void ArduPilotMegaMAV::playArmStateChangedAudioMessage(bool armedState)
 
 //******************* Classes for Sepcial message handling **************************
 
-const QString MessageBase::timeFieldName("TimeUS");
-
 MessageBase::MessageBase() : m_Index(0), m_TimeStamp(0)
 {}
 
-MessageBase::MessageBase(const quint64 index, const quint64 timeStamp, const QString &name, const QColor &color) :
+MessageBase::MessageBase(const quint32 index, const double timeStamp, const QString &name, const QColor &color) :
     m_Index(index),
     m_TimeStamp(timeStamp),
     m_TypeName(name),
     m_Color(color)
 {}
 
-quint64 MessageBase::getIndex() const
+quint32 MessageBase::getIndex() const
 {
     return m_Index;
 }
 
-quint64 MessageBase::getTimeStamp() const
+double MessageBase::getTimeStamp() const
 {
     return m_TimeStamp;
 }
@@ -437,50 +439,61 @@ ErrorMessage::ErrorMessage() : m_SubSys(0), m_ErrorCode(0)
     m_Color    = QColor(150,0,0);
 }
 
-ErrorMessage::ErrorMessage(const quint64 index, const quint64 timeStamp, const quint8 subSys, const quint8 errCode) :
+ErrorMessage::ErrorMessage(const QString &TimeFieldName) : m_SubSys(0), m_ErrorCode(0)
+{
+    // Set up base class vars for this message
+    m_TypeName = TypeName;
+    m_Color    = QColor(150,0,0);
+    m_TimeFieldName = TimeFieldName;
+}
+
+
+ErrorMessage::ErrorMessage(const quint32 index, const double timeStamp, const quint32 subSys, const quint32 errCode) :
     MessageBase(index, timeStamp, TypeName, QColor(150,0,0)),
     m_SubSys(subSys),
     m_ErrorCode(errCode)
 {}
 
-quint8 ErrorMessage::getSubsystemCode() const
+quint32 ErrorMessage::getSubsystemCode() const
 {
     return m_SubSys;
 }
 
-quint8 ErrorMessage::getErrorCode() const
+quint32 ErrorMessage::getErrorCode() const
 {
     return m_ErrorCode;
 }
 
-bool ErrorMessage::setFromSqlRecord(const QSqlRecord &record)
+bool ErrorMessage::setFromSqlRecord(const QSqlRecord &record, const double timeDivider)
 {
     bool rc1 = false;
     bool rc2 = false;
     bool rc3 = false;
+    bool rc4 = false;
 
     if(record.value(0).isValid())
     {
-        m_Index = static_cast<quint64>(record.value(0).toLongLong());
+        m_Index = static_cast<quint32>(record.value(0).toUInt());
         rc1 = true;
     }
-    if (record.contains(timeFieldName))
+    if (record.contains(m_TimeFieldName))
     {
-        m_TimeStamp = static_cast<quint64>(record.value(timeFieldName).toLongLong());
-        // TimeStamp does not influence the returncode as its optional
+        m_TimeStamp = record.value(m_TimeFieldName).toDouble();
+        m_TimeStamp /= timeDivider;
+        rc2 = true;
     }
     if (record.contains("Subsys"))
     {
-        m_SubSys = static_cast<quint8>(record.value("Subsys").toInt());
-        rc2 = true;
+        m_SubSys = static_cast<quint32>(record.value("Subsys").toUInt());
+        rc3 = true;
     }
     if (record.contains("ECode"))
     {
-        m_ErrorCode = static_cast<quint8>(record.value("ECode").toInt());
-        rc3 = true;
+        m_ErrorCode = static_cast<quint32>(record.value("ECode").toUInt());
+        rc4 = true;
     }
 
-    return rc1 && rc2 && rc3;
+    return rc1 && rc2 && rc3 && rc4;
 }
 
 QString ErrorMessage::toString() const
@@ -503,49 +516,59 @@ ModeMessage::ModeMessage() : m_Mode(0), m_ModeNum(0)
     m_Color    = QColor(50,125,0);
 }
 
-ModeMessage::ModeMessage(const quint64 index, const quint64 timeStamp, const qint8 mode, const quint8 modeNum) :
+ModeMessage::ModeMessage(const QString &TimeFieldName) : m_Mode(0), m_ModeNum(0)
+{
+    // Set up base class vars for this message
+    m_TypeName = TypeName;
+    m_Color    = QColor(50,125,0);
+    m_TimeFieldName = TimeFieldName;
+}
+
+ModeMessage::ModeMessage(const quint32 index, const double timeStamp, const quint32 mode, const quint32 modeNum) :
     MessageBase(index, timeStamp, TypeName, QColor(50,125,0)),
     m_Mode(mode),
     m_ModeNum(modeNum)
 {}
 
-qint8 ModeMessage::getMode() const
+quint32 ModeMessage::getMode() const
 {
     return m_Mode;
 }
 
-quint8 ModeMessage::getModeNum() const
+quint32 ModeMessage::getModeNum() const
 {
     return m_ModeNum;
 }
 
-bool ModeMessage::setFromSqlRecord(const QSqlRecord &record)
+bool ModeMessage::setFromSqlRecord(const QSqlRecord &record, const double timeDivider)
 {
     bool rc1 = false;
     bool rc2 = false;
+    bool rc3 = false;
 
     if(record.value(0).isValid())
     {
-        m_Index = static_cast<quint64>(record.value(0).toLongLong());
+        m_Index = static_cast<quint32>(record.value(0).toUInt());
         rc1 = true;
     }
-    if (record.contains(timeFieldName))
+    if (record.contains(m_TimeFieldName))
     {
-        m_TimeStamp = static_cast<quint64>(record.value(timeFieldName).toLongLong());
-        // TimeStamp does not influence the returncode as its optional
+        m_TimeStamp = record.value(m_TimeFieldName).toDouble();
+        m_TimeStamp /= timeDivider;
+        rc2 = true;
     }
     if (record.contains("Mode"))
     {
-        m_Mode = static_cast<quint8>(record.value("Mode").toInt());
-        rc2 = true;
+        m_Mode = static_cast<quint32>(record.value("Mode").toUInt());
+        rc3 = true;
     }
     if (record.contains("ModeNum"))
     {
-        m_ModeNum = static_cast<quint8>(record.value("ModeNum").toInt());
+        m_ModeNum = static_cast<quint32>(record.value("ModeNum").toUInt());
        // ModeNum does not influence the returncode as its optional
     }
 
-    return rc1 && rc2;
+    return rc1 && rc2 && rc3;
 }
 
 QString ModeMessage::toString() const
@@ -568,38 +591,48 @@ EventMessage::EventMessage() : m_EventID(0)
     m_Color    = QColor(0,0,125);
 }
 
-EventMessage::EventMessage(const quint64 index, const quint64 timeStamp, const quint8 eventID) :
+EventMessage::EventMessage(const QString &TimeFieldName) : m_EventID(0)
+{
+    // Set up base class vars for this message
+    m_TypeName = TypeName;
+    m_Color    = QColor(0,0,125);
+    m_TimeFieldName = TimeFieldName;
+}
+
+EventMessage::EventMessage(const quint32 index, const double timeStamp, const quint32 eventID) :
     MessageBase(index, timeStamp, TypeName, QColor(0,0,125)),
     m_EventID(eventID)
 {}
 
-quint8 EventMessage::getEventID() const
+quint32 EventMessage::getEventID() const
 {
     return m_EventID;
 }
 
-bool EventMessage::setFromSqlRecord(const QSqlRecord &record)
+bool EventMessage::setFromSqlRecord(const QSqlRecord &record, const double timeDivider)
 {
     bool rc1 = false;
     bool rc2 = false;
+    bool rc3 = false;
 
     if(record.value(0).isValid())
     {
-        m_Index = static_cast<quint64>(record.value(0).toLongLong());
+        m_Index = static_cast<quint32>(record.value(0).toUInt());
         rc1 = true;
     }
-    if (record.contains(timeFieldName))
+    if (record.contains(m_TimeFieldName))
     {
-        m_TimeStamp = static_cast<quint64>(record.value(timeFieldName).toLongLong());
-        // TimeStamp does not influence the returncode as its optional
+        m_TimeStamp = record.value(m_TimeFieldName).toDouble();
+        m_TimeStamp /= timeDivider;
+        rc2 = true;
     }
     if (record.contains("Id"))
     {
-        m_EventID = static_cast<quint8>(record.value("Id").toInt());
-        rc2 = true;
+        m_EventID = static_cast<quint32>(record.value("Id").toUInt());
+        rc3 = true;
     }
 
-    return rc1 && rc2;
+    return rc1 && rc2 && rc3;
 }
 
 QString EventMessage::toString() const
@@ -622,33 +655,43 @@ MsgMessage::MsgMessage()
     m_Color    = QColor(0,0,0);
 }
 
-MsgMessage::MsgMessage(const quint64 index, const quint64 timeStamp, const QString &message) :
+MsgMessage::MsgMessage(const QString &TimeFieldName)
+{
+    // Set up base class vars for this message
+    m_TypeName = TypeName;
+    m_Color    = QColor(0,0,0);
+    m_TimeFieldName = TimeFieldName;
+}
+
+MsgMessage::MsgMessage(const quint32 index, const double timeStamp, const QString &message) :
     MessageBase(index, timeStamp, TypeName, QColor(0,0,0)),
     m_Message(message)
 {}
 
-bool MsgMessage::setFromSqlRecord(const QSqlRecord &record)
+bool MsgMessage::setFromSqlRecord(const QSqlRecord &record, const double timeDivider)
 {
     bool rc1 = false;
     bool rc2 = false;
+    bool rc3 = false;
 
     if(record.value(0).isValid())
     {
-        m_Index = static_cast<quint64>(record.value(0).toLongLong());
+        m_Index = static_cast<quint32>(record.value(0).toUInt());
         rc1 = true;
     }
-    if (record.contains(timeFieldName))
+    if (record.contains(m_TimeFieldName))
     {
-        m_TimeStamp = static_cast<quint64>(record.value(timeFieldName).toLongLong());
-        // TimeStamp does not influence the returncode as its optional
+        m_TimeStamp = record.value(m_TimeFieldName).toDouble();
+        m_TimeStamp /= timeDivider;
+        rc2 = true;
     }
     if (record.contains("Message"))
     {
         m_Message = record.value("Message").toString();
-        rc2 = true;
+        rc3 = true;
     }
 
-    return rc1 && rc2;
+    return rc1 && rc2 && rc3;
 }
 
 QString MsgMessage::toString() const
@@ -658,23 +701,23 @@ QString MsgMessage::toString() const
 
 //********
 
-MessageBase::Ptr MessageFactory::getMessageOfType(const QString &type)
+MessageBase::Ptr MessageFactory::getMessageOfType(const QString &type, const QString &TimeFieldName)
 {
     if (type == ErrorMessage::TypeName)
     {
-        return MessageBase::Ptr(new ErrorMessage());
+        return MessageBase::Ptr(new ErrorMessage(TimeFieldName));
     }
     else if (type == ModeMessage::TypeName)
     {
-        return MessageBase::Ptr(new ModeMessage());
+        return MessageBase::Ptr(new ModeMessage(TimeFieldName));
     }
     else if (type == EventMessage::TypeName)
     {
-        return MessageBase::Ptr(new EventMessage());
+        return MessageBase::Ptr(new EventMessage(TimeFieldName));
     }
     else if (type == MsgMessage::TypeName)
     {
-        return MessageBase::Ptr(new MsgMessage());
+        return MessageBase::Ptr(new MsgMessage(TimeFieldName));
     }
     QLOG_WARN() << "MessageFactory::getMessageOfType: No message of type '" << type << "' could be created";
     return MessageBase::Ptr();
@@ -1220,6 +1263,12 @@ QString Plane::MessageFormatter::format(const ModeMessage &message)
         break;
     case Plane::QLOITER:
         outputStream << "QLoiter";
+        break;
+    case Plane::QLAND:
+        outputStream << "QLand";
+        break;
+    case Plane::QRTL:
+        outputStream << "QRTL";
         break;
     default:
         outputStream << "Unknown Mode:" << message.getMode();

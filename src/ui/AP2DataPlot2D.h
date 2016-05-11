@@ -123,6 +123,8 @@ private slots:
     void xAxisChanged(QCPRange range);
     void replyTLogButtonClicked();
 
+    void exportLogClicked();
+    void exportKmlClicked();
     void exportButtonClicked();
     void exportDialogAccepted();
 
@@ -147,12 +149,6 @@ private slots:
     void setExcelViewHidden(bool hidden);
 
 private:
-
-    /**
-     * @brief timeDivisor Used for X-Axis scaling when using time axis
-     *        avoiding insanely high numbers on legend
-     */
-    static const double c_timeDivisor;    //!< scales micro seconds to seconds
 
     void showEvent(QShowEvent *evt);
     void hideEvent(QHideEvent *evt);
@@ -281,6 +277,8 @@ private:
     QCPItemLine *m_timeLine;
 
     QMap<quint64, MessageBase::Ptr> m_indexToMessageMap;    /// Map holding all Messages which are printed as arrows
+    int m_lastHorizontalScrollerVal;                        /// Used to avoid multiple calls with same value
+    bool m_KmlExport;                                       /// True if exporting to Kml
 
 };
 

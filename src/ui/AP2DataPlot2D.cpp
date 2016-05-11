@@ -52,9 +52,8 @@ This file is part of the APM_PLANNER project
 
 #define ROW_HEIGHT_PADDING 3 //Number of additional pixels over font height for each row for the table/excel view.
 
-const double AP2DataPlot2D::c_timeDivisor = 1000000.0;
-
 AP2DataPlot2D::AP2DataPlot2D(QWidget *parent,bool isIndependant) : QWidget(parent),
+    m_tableModel(NULL),
     m_updateTimer(NULL),
     m_showOnlyActive(false),
     m_graphCount(0),
@@ -71,7 +70,9 @@ AP2DataPlot2D::AP2DataPlot2D(QWidget *parent,bool isIndependant) : QWidget(paren
     m_logDownloadDialog(NULL),
     m_loadedLogMavType(MAV_TYPE_ENUM_END),
     m_statusTextPos(0),
-    m_useTimeOnX(false)
+    m_useTimeOnX(false),
+    m_lastHorizontalScrollerVal(0),
+    m_KmlExport(false)
 {
     ui.setupUi(this);
 
@@ -83,7 +84,8 @@ AP2DataPlot2D::AP2DataPlot2D(QWidget *parent,bool isIndependant) : QWidget(paren
     connect(ui.sortInvertSelectPushButton,SIGNAL(clicked()),this,SLOT(sortSelectInvertClicked()));
     ui.tableSortGroupBox->setVisible(false);
     ui.sortShowPushButton->setVisible(false);
-    ui.exportPushButton->setVisible(false);
+    ui.exportLogButton->setVisible(false);
+    ui.exportKmlButton->setVisible(false);
 
     QDateTime utc = QDateTime::currentDateTimeUtc();
     utc.setTimeSpec(Qt::LocalTime);
@@ -149,7 +151,6 @@ AP2DataPlot2D::AP2DataPlot2D(QWidget *parent,bool isIndependant) : QWidget(paren
     ui.tableWidget->addAction(m_addGraphAction);
     connect(m_addGraphAction,SIGNAL(triggered()),this,SLOT(addGraphLeft()));
 
-    //ui.tableWidget->setVisible(false);
     setExcelViewHidden(true);
     ui.tableWidget->verticalHeader()->setDefaultSectionSize(ui.tableWidget->fontMetrics().height() + ROW_HEIGHT_PADDING);
     ui.hideExcelView->setVisible(false);
@@ -157,7 +158,7 @@ AP2DataPlot2D::AP2DataPlot2D(QWidget *parent,bool isIndependant) : QWidget(paren
     connect(ui.loadOfflineLogButton,SIGNAL(clicked()),this,SLOT(loadButtonClicked()));
     connect(ui.autoScrollCheckBox,SIGNAL(clicked(bool)),this,SLOT(autoScrollClicked(bool)));
     connect(ui.hideExcelView,SIGNAL(clicked(bool)),this,SLOT(setExcelViewHidden(bool)));
-    connect(ui.tableWidget,SIGNAL(currentCellChanged(int,int,int,int)),this,SLOT(tableCellChanged(int,int,int,int)));
+    //connect(ui.tableWidget,SIGNAL(currentCellChanged(int,int,int,int)),this,SLOT(tableCellChanged(int,int,int,int)));
 
     connect(ui.graphControlsPushButton,SIGNAL(clicked()),this,SLOT(graphControlsButtonClicked()));
     connect(ui.toKMLPushButton, SIGNAL(clicked()), this, SLOT(logToKmlClicked()));
@@ -172,7 +173,9 @@ AP2DataPlot2D::AP2DataPlot2D(QWidget *parent,bool isIndependant) : QWidget(paren
     ui.downloadPushButton->setEnabled(false);
     connect(ui.loadTLogButton,SIGNAL(clicked()),this,SLOT(replyTLogButtonClicked()));
 
-    connect(ui.exportPushButton,SIGNAL(clicked()),this,SLOT(exportButtonClicked()));
+    // Export buttons
+    connect(ui.exportLogButton, SIGNAL(clicked()), this, SLOT(exportLogClicked()));
+    connect(ui.exportKmlButton, SIGNAL(clicked()), this, SLOT(exportKmlClicked()));
 
     ui.horizontalSplitter->setStretchFactor(0,20);
     ui.horizontalSplitter->setStretchFactor(1,1);
@@ -207,7 +210,6 @@ void AP2DataPlot2D::saveSettings()
     settings.setValue("SHOW_ERR", ui.errDisplayCheckBox->isChecked());
     settings.setValue("SHOW_MODE", ui.modeDisplayCheckBox->isChecked());
 
-
     settings.sync();
 }
 
@@ -224,6 +226,7 @@ void AP2DataPlot2D::setExcelViewHidden(bool hidden)
         ui.sortShowPushButton->setVisible(true);
     }
 }
+
 void AP2DataPlot2D::graphColorsChanged(QMap<QString,QColor> colormap)
 {
     for (QMap<QString,QColor>::const_iterator i = colormap.constBegin();i!=colormap.constEnd();i++)
@@ -308,32 +311,37 @@ void AP2DataPlot2D::replyTLogButtonClicked()
         m_tlogReplayEnabled = true;
         ui.loadTLogButton->setText("Disable Log Playback");
     }
-
-
 }
 
 void AP2DataPlot2D::xAxisChanged(QCPRange range)
 {
+    disconnect(ui.horizontalScrollBar,SIGNAL(sliderMoved(int)),this,SLOT(horizontalScrollMoved(int)));
+    disconnect(ui.horizontalScrollBar, SIGNAL(valueChanged(int)), this, SLOT(horizontalScrollMoved(int)));
+    disconnect(ui.verticalScrollBar, SIGNAL(valueChanged(int)), this, SLOT(verticalScrollMoved(int)));
+
     ui.horizontalScrollBar->setValue(qRound(range.center())); // adjust position of scroll bar slider
     ui.horizontalScrollBar->setPageStep(qRound(range.size())); // adjust size of scroll bar slider
     double totalrange = m_scrollEndIndex - m_scrollStartIndex;
     double currentrange = range.upper - range.lower;
+    ui.verticalScrollBar->setValue(100.0 * (currentrange / totalrange));
 
-    disconnect(ui.verticalScrollBar, SIGNAL(valueChanged(int)), this, SLOT(verticalScrollMoved(int)));
-    ui.verticalScrollBar->setValue(100 * (currentrange / totalrange));
+    connect(ui.horizontalScrollBar,SIGNAL(sliderMoved(int)),this,SLOT(horizontalScrollMoved(int)));
+    connect(ui.horizontalScrollBar, SIGNAL(valueChanged(int)), this, SLOT(horizontalScrollMoved(int)));
     connect(ui.verticalScrollBar, SIGNAL(valueChanged(int)), this, SLOT(verticalScrollMoved(int)));
 }
 
 void AP2DataPlot2D::horizontalScrollMoved(int value)
 {
-    double test = qAbs(m_wideAxisRect->axis(QCPAxis::atBottom)->range().center()-value);
-    if (test  > 0.01) // if user is dragging plot, we don't want to replot twice
+    if (value != m_lastHorizontalScrollerVal)
     {
-      m_wideAxisRect->axis(QCPAxis::atBottom)->setRange(value,m_wideAxisRect->axis(QCPAxis::atBottom)->range().size(), Qt::AlignCenter);
-      m_plot->replot();
+        m_lastHorizontalScrollerVal = value;
+        disconnect(m_wideAxisRect->axis(QCPAxis::atBottom), SIGNAL(rangeChanged(QCPRange)), this, SLOT(xAxisChanged(QCPRange)));
+        m_wideAxisRect->axis(QCPAxis::atBottom)->setRange(value,m_wideAxisRect->axis(QCPAxis::atBottom)->range().size(), Qt::AlignCenter);
+        m_plot->replot();
+        connect(m_wideAxisRect->axis(QCPAxis::atBottom), SIGNAL(rangeChanged(QCPRange)), this, SLOT(xAxisChanged(QCPRange)));
     }
-    return;
 }
+
 void AP2DataPlot2D::showEvent(QShowEvent *evt)
 {
     if (m_updateTimer)
@@ -376,67 +384,59 @@ void AP2DataPlot2D::plotDoubleClick(QMouseEvent * evt)
         return;
     }
 
-    for (int i=0;i<m_graphClassMap.keys().size();i++)
+    double key = 0.0;
+    double timeStamp = 0.0;
+    QCPGraph *graph = m_graphClassMap.value(m_graphClassMap.keys()[0]).graph;
+    key = graph->keyAxis()->pixelToCoord(evt->x());
+
+    if (m_useTimeOnX)
     {
+        // We scaled the time by timeDivisor when plotting the graph
+        // therefore we have to scale when searching for the original timestamp
+        timeStamp = key;
+        key = m_tableModel->getNearestIndexForTimestamp(timeStamp);
+    }
 
-        double key = 0.0;
-        double timeStamp = 0.0;
-        QCPGraph *graph = m_graphClassMap.value(m_graphClassMap.keys()[i]).graph;
-        key = graph->keyAxis()->pixelToCoord(evt->x());
+    quint64 position = floor(key);
+    quint64 min = m_tableModel->getFirstIndex();
+    quint64 max = m_tableModel->getLastIndex();
 
-        if (m_useTimeOnX)
+    if ( position > max )
+    {
+        ui.tableWidget->scrollToBottom();
+        double plotPos = m_useTimeOnX ? m_tableModel->getMaxTime() : max;
+        plotCurrentIndex(plotPos);
+    }
+    else if ( position < min )
+    {
+        ui.tableWidget->scrollToTop();
+        double plotPos = m_useTimeOnX ? m_tableModel->getMinTime() : min;
+        plotCurrentIndex(plotPos);
+    }
+    else
+    {
+        //search for previous event (remember the table may be filtered)
+        QModelIndex sourceIndex = m_tableModel->index(position-min, 0);
+        QModelIndex index = m_tableFilterProxyModel->mapFromSource(sourceIndex);
+        while ( sourceIndex.row() >= static_cast<int>(min) && !index.isValid() )
         {
-            // We scaled the time by timeDivisor when plotting the graph
-            // therefore we have to scale when searching for the original timestamp
-            timeStamp = key;
-            key = m_tableModel->getNearestIndexForTimestamp(timeStamp * c_timeDivisor);
+            sourceIndex = m_tableModel->index(sourceIndex.row() - 1, 0);
+            index = m_tableFilterProxyModel->mapFromSource(sourceIndex);
         }
 
-        if (i == 0)
+        if ( !index.isValid() )
         {
-            quint64 position = floor(key);
-            quint64 min = m_tableModel->getFirstIndex();
-            quint64 max = m_tableModel->getLastIndex();
-
-            if ( position > max )
+            //couldn't find filtered index by looking back, try forward...
+            sourceIndex = m_tableModel->index(position-min, 0);
+            index = m_tableFilterProxyModel->mapFromSource(sourceIndex);
+            while ( sourceIndex.row() <= static_cast<int>(max) && !index.isValid() )
             {
-                ui.tableWidget->scrollToBottom();
-                double plotPos = m_useTimeOnX ? m_tableModel->getMaxTime() : max;
-                plotCurrentIndex(plotPos);
-
-            }
-            else if ( position < min )
-            {
-                ui.tableWidget->scrollToTop();
-                double plotPos = m_useTimeOnX ? m_tableModel->getMinTime() : min;
-                plotCurrentIndex(plotPos);
-            }
-            else
-            {
-                //search for previous event (remember the table may be filtered)
-                QModelIndex sourceIndex = m_tableModel->index(position-min, 0);
-                QModelIndex index = m_tableFilterProxyModel->mapFromSource(sourceIndex);
-                while ( sourceIndex.row() >= static_cast<int>(min) && !index.isValid() )
-                {
-                    sourceIndex = m_tableModel->index(sourceIndex.row() - 1, 0);
-                    index = m_tableFilterProxyModel->mapFromSource(sourceIndex);
-                }
-
-                if ( !index.isValid() )
-                {
-                    //couldn't find filtered index by looking back, try forward...
-                    sourceIndex = m_tableModel->index(position-min, 0);
-                    index = m_tableFilterProxyModel->mapFromSource(sourceIndex);
-                    while ( sourceIndex.row() <= static_cast<int>(max) && !index.isValid() )
-                    {
-                        sourceIndex = m_tableModel->index(sourceIndex.row() + 1, 0);
-                        index = m_tableFilterProxyModel->mapFromSource(sourceIndex);
-                    }
-                }
-                ui.tableWidget->setCurrentIndex(index);
-                ui.tableWidget->scrollTo(index);
+                sourceIndex = m_tableModel->index(sourceIndex.row() + 1, 0);
+                index = m_tableFilterProxyModel->mapFromSource(sourceIndex);
             }
         }
+        ui.tableWidget->setCurrentIndex(index);
+        ui.tableWidget->scrollTo(index);
     }
 }
 
@@ -607,7 +607,7 @@ void AP2DataPlot2D::selectedRowChanged(QModelIndex current,QModelIndex previous)
     {
         // timestamp value of the current row is in colum 2
         double item = ui.tableWidget->model()->itemData(ui.tableWidget->model()->index(current.row(),2)).value(Qt::DisplayRole).toInt();
-        plotCurrentIndex(item / c_timeDivisor);
+        plotCurrentIndex(item / m_tableModel->getTimeDivisor());
     }
     else
     {
@@ -949,10 +949,8 @@ void AP2DataPlot2D::loadDialogAccepted()
     plot->setAttribute(Qt::WA_DeleteOnClose,true);
     plot->show();
     plot->loadLog(m_filename);
-
-    //loadLog(m_filename);
-
 }
+
 void AP2DataPlot2D::loadLog(QString filename)
 {
     m_logLoaded = true;
@@ -968,13 +966,12 @@ void AP2DataPlot2D::loadLog(QString filename)
     }
     m_plot->replot();
     m_graphClassMap.clear();
-    m_graphCount=0;
+    m_graphCount = 0;
     m_dataList.clear();
 
     QString shortfilename =filename.mid(filename.lastIndexOf("/")+1);
     setWindowTitle(tr("Graph: %1").arg(shortfilename));
-    ui.toKMLPushButton->setDisabled(true);
-    ui.exportPushButton->setVisible(true);
+    ui.toKMLPushButton->setVisible(false);
 
     m_wideAxisRect->axis(QCPAxis::atBottom, 0)->setTickLabelType(QCPAxis::ltNumber);
     m_wideAxisRect->axis(QCPAxis::atBottom, 0)->setRange(0,100);
@@ -1004,6 +1001,7 @@ void AP2DataPlot2D::threadTerminated()
 
 AP2DataPlot2D::~AP2DataPlot2D()
 {
+    QLOG_DEBUG() << "AP2DataPlot2D::~AP2DataPlot2D()";
     saveSettings();
     if (m_updateTimer)
     {
@@ -1013,6 +1011,7 @@ AP2DataPlot2D::~AP2DataPlot2D()
     }
     if (m_logLoaderThread)
     {
+        m_logLoaderThread->allowToTerminate();  // without this call the loader cannot terminate
         m_logLoaderThread->stopLoad();
         m_logLoaderThread->deleteLater();
         m_logLoaderThread = NULL;
@@ -1031,6 +1030,9 @@ AP2DataPlot2D::~AP2DataPlot2D()
 
     delete m_plot;
     m_plot = NULL;
+
+    delete m_tableModel;
+    m_tableModel = NULL;
 }
 
 void AP2DataPlot2D::itemEnabled(QString name)
@@ -1039,21 +1041,11 @@ void AP2DataPlot2D::itemEnabled(QString name)
     {
         QString parent = name.split(".")[0];
         QString child = name.split(".")[1];
-        /*if (!m_sharedDb.isOpen())
-        {
-            if (!m_sharedDb.open())
-            {
-                //emit error("Unable to open database: " + m_sharedDb.lastError().text());
-                QMessageBox::information(0,"Error","Error opening DB");
-                return;
-            }
-        }*/
-
         bool isstr = false;
         QList<QPair<double,QString> > strlist;
         QVector<double> xlist;
         QVector<double> ylist;
-        QMap<quint64,QVariant> values = m_tableModel->getValues(parent, child, m_useTimeOnX);
+        QMap<double,QVariant> values = m_tableModel->getValues(parent, child, m_useTimeOnX);
         if (values.size() == 0)
         {
             //No values!
@@ -1061,7 +1053,7 @@ void AP2DataPlot2D::itemEnabled(QString name)
             ui.dataSelectionScreen->disableItem(name);
             return;
         }
-        for (QMap<quint64,QVariant>::const_iterator i = values.constBegin();i!=values.constEnd();i++)
+        for (QMap<double,QVariant>::const_iterator i = values.constBegin();i!=values.constEnd();i++)
         {
             if (i.value().type() == QVariant::String)
             {
@@ -1076,7 +1068,7 @@ void AP2DataPlot2D::itemEnabled(QString name)
             }
             if(m_useTimeOnX)
             {
-                xlist.append(static_cast<double>(i.key())/c_timeDivisor);
+                xlist.append(static_cast<double>(i.key()));
             }
             else
             {
@@ -1098,18 +1090,8 @@ void AP2DataPlot2D::itemEnabled(QString name)
         QCPGraph *mainGraph1 = m_plot->addGraph(m_wideAxisRect->axis(QCPAxis::atBottom), m_wideAxisRect->axis(QCPAxis::atLeft,m_graphCount++));
         m_graphNameList.append(name);
         QCPAxis *xAxis = m_wideAxisRect->axis(QCPAxis::atBottom);
-
-        if (m_axisGroupingDialog)
-        {
-            if (!name.contains(ModeMessage::TypeName) &&
-                !name.contains(ErrorMessage::TypeName)  &&
-                !name.contains(EventMessage::TypeName) &&
-                !name.contains(MsgMessage::TypeName))
-            {
-                m_axisGroupingDialog->addAxis(name,yAxis->range().lower,yAxis->range().upper,color);
-            }
-        }
         mainGraph1->setPen(QPen(color, 1));
+
         Graph graph;
         graph.axis = yAxis;
         graph.graph=  mainGraph1;
@@ -1143,6 +1125,18 @@ void AP2DataPlot2D::itemEnabled(QString name)
             mainGraph1->setData(xlist, ylist);
         }
         mainGraph1->rescaleValueAxis();
+
+        if (m_axisGroupingDialog)
+        {
+            if (!name.contains(ModeMessage::TypeName) &&
+                !name.contains(ErrorMessage::TypeName)  &&
+                !name.contains(EventMessage::TypeName) &&
+                !name.contains(MsgMessage::TypeName))
+            {
+                m_axisGroupingDialog->addAxis(name,yAxis->range().lower,yAxis->range().upper,color);
+            }
+        }
+        // Graph 1 is the text arrow graph Graph 2 is the first 'line graph'
         if (m_graphCount <= 2)
         {
             mainGraph1->rescaleKeyAxis();
@@ -1150,6 +1144,7 @@ void AP2DataPlot2D::itemEnabled(QString name)
             m_wideAxisRect->axis(QCPAxis::atBottom)->setRangeUpper(xlist.back());
             yAxis->grid()->setVisible(true);
         }
+        // as soon as 2 'line graphs' are visible remove the grid
         else if(m_graphCount == 3 )
         {
             // brute force
@@ -1215,10 +1210,7 @@ void AP2DataPlot2D::itemEnabled(QString name)
             }
             Graph graph;
             graph.axis = axis;
-            graph.groupName = "";
             graph.graph=  mainGraph1;
-            graph.isInGroup = false;
-            graph.isManualRange = false;
             m_graphClassMap[name] = graph;
 
             mainGraph1->setPen(QPen(color, 1));
@@ -1244,6 +1236,8 @@ void AP2DataPlot2D::itemDisabled(QString name)
         m_graphClassMap.remove(name);
         m_graphNameList.removeOne(name);
         m_graphCount--;
+        // first graph is the one for the text arrows, so the second
+        // is the first 'line graph'
         if (m_graphCount == 2)
         {
             // Show grid if only one graph left
@@ -1263,6 +1257,7 @@ void AP2DataPlot2D::itemDisabled(QString name)
 void AP2DataPlot2D::progressDialogCanceled()
 {
     m_logLoaderThread->stopLoad();
+    m_logLoaderThread->allowToTerminate();  // without this call the loader cannot terminate
 }
 
 void AP2DataPlot2D::clearGraph()
@@ -1280,7 +1275,7 @@ void AP2DataPlot2D::clearGraph()
         m_axisGroupingDialog->hide();
     }
     m_graphClassMap.clear();
-    m_graphCount=0;
+    m_graphCount = 0;
     m_dataList.clear();
 
     if (m_logLoaded)
@@ -1383,6 +1378,7 @@ void AP2DataPlot2D::threadDone(AP2DataPlotStatus state, MAV_TYPE type)
     // Errorhandling
     if (state.getParsingState() != AP2DataPlotStatus::OK)
     {
+        QString infoString;
         QMessageBox msgBox;
         msgBox.setIcon(QMessageBox::Warning);
         msgBox.setWindowTitle("Warning");
@@ -1391,19 +1387,24 @@ void AP2DataPlot2D::threadDone(AP2DataPlotStatus state, MAV_TYPE type)
 
         if (state.getParsingState() == AP2DataPlotStatus::FmtError)
         {
-            msgBox.setInformativeText("There were errors only in format discription. Usually this is no problem.");
+            infoString = "There were errors only in format discription. Usually this is no problem.\n\r";
         }
         else if (state.getParsingState() == AP2DataPlotStatus::TruncationError)
         {
-            msgBox.setInformativeText("The data was truncated!");
+            infoString = "The data was truncated!\n\r";
+        }
+        else if (state.getParsingState() == AP2DataPlotStatus::TimeError)
+        {
+            infoString = "The time data was currupted. Maybe plotting by time may not work.\n\r";
         }
         else
         {
-            msgBox.setInformativeText("There were data errors / unreadable data in the log!"
-                                      " The data is potentially corrupt and incorrect.");
+            infoString = "There were data errors / unreadable data in the log! The data is potentially corrupt and incorrect.\r";
         }
+
+        msgBox.setInformativeText(infoString + "Detected:\r" + state.getErrorOverview());
         msgBox.setDefaultButton(QMessageBox::Ok);
-        msgBox.setDetailedText(state.getErrorText());
+        msgBox.setDetailedText(state.getDetailedErrorText());
         msgBox.exec();
     }
 
@@ -1427,6 +1428,7 @@ void AP2DataPlot2D::threadDone(AP2DataPlotStatus state, MAV_TYPE type)
     }
 
     // Setup basic graph for all arrow plots -> MODE/ERR/EV/MSG
+    // This is graph one!
     QCPAxis *yAxis = m_wideAxisRect->addAxis(QCPAxis::atLeft);
     yAxis->setVisible(false);
     yAxis->setLabel("MODE/ERR/EV/MSG");
@@ -1484,6 +1486,9 @@ void AP2DataPlot2D::threadDone(AP2DataPlotStatus state, MAV_TYPE type)
     setExcelViewHidden(false);
     ui.hideExcelView->setVisible(true);
     ui.sortShowPushButton->setVisible(true);
+    ui.exportLogButton->setVisible(true);
+    ui.exportKmlButton->setVisible(true);
+
     // the switch x axis check box shall only be active if model can handle timestamps
     ui.indexTypeCheckBox->setVisible(m_tableModel->canUseTimeOnX());
 
@@ -1496,6 +1501,8 @@ void AP2DataPlot2D::threadDone(AP2DataPlotStatus state, MAV_TYPE type)
     // Enable double clicking of graph
     connect(m_plot,SIGNAL(mouseDoubleClick(QMouseEvent*)),this,SLOT(plotDoubleClick(QMouseEvent*)));
 
+    QLOG_DEBUG() << "Calling allowToTerminate()";
+    m_logLoaderThread->allowToTerminate(); // without this call the loader cannot terminate
 }
 
 
@@ -1541,6 +1548,18 @@ void AP2DataPlot2D::closeLogDownloadDialog()
     }
 }
 
+void AP2DataPlot2D::exportLogClicked()
+{
+    m_KmlExport = false;
+    exportButtonClicked();
+}
+
+void AP2DataPlot2D::exportKmlClicked()
+{
+    m_KmlExport = true;
+    exportButtonClicked();
+}
+
 void AP2DataPlot2D::exportButtonClicked()
 {
     if (!m_logLoaded)
@@ -1554,25 +1573,18 @@ void AP2DataPlot2D::exportButtonClicked()
         return;
     }
 
-    /*if (!m_sharedDb.isOpen())
-    {
-        if (!m_sharedDb.open())
-        {
-            //emit error("Unable to open database: " + m_sharedDb.lastError().text());
-            QMessageBox::information(0,"Error","Error opening DB");
-            return;
-        }
-    }*/
+    QString exportExtension = m_KmlExport ? ".kml" : ".log";
 
     //remove current extension
-    QString exportFilename = m_filename.replace(".bin",".log", Qt::CaseInsensitive); // remove extension
+    QString exportFilename = m_filename.replace(".bin",exportExtension, Qt::CaseInsensitive); // remove extension
     QFileDialog *dialog = new QFileDialog(this,"Save Log File",QGC::logDirectory());
     dialog->setAcceptMode(QFileDialog::AcceptSave);
-    dialog->setNameFilter("*.log");
+    dialog->setNameFilter("*" + exportExtension);
     dialog->selectFile(exportFilename);
     QLOG_DEBUG() << " Suggested Export Filename: " << exportFilename;
     dialog->open(this,SLOT(exportDialogAccepted()));
 }
+
 void AP2DataPlot2D::exportDialogAccepted()
 {
     QElapsedTimer timer1;
@@ -1589,12 +1601,24 @@ void AP2DataPlot2D::exportDialogAccepted()
     QString outputFileName = dialog->selectedFiles().at(0);
     dialog->close();
 
-    QFile outputfile(outputFileName);
-    if (!outputfile.open(QIODevice::ReadWrite | QIODevice::Truncate))
+    QFile outputfile;
+    kml::KMLCreator kmlExporter;
+
+    if (m_KmlExport)
     {
-        QMessageBox::information(this,"Error","Unable to open output file: " + outputfile.errorString());
-        return;
+
+        kmlExporter.start(outputFileName);
     }
+    else
+    {
+        outputfile.setFileName(outputFileName);
+        if (!outputfile.open(QIODevice::ReadWrite | QIODevice::Truncate))
+        {
+            QMessageBox::information(this,"Error","Unable to open output file: " + outputfile.errorString());
+            return;
+        }
+    }
+
     QProgressDialog *progressDialog = new QProgressDialog("Exporting File","Cancel",0,100,this);
     progressDialog->setWindowModality(Qt::WindowModal);
     progressDialog->show();
@@ -1609,9 +1633,16 @@ void AP2DataPlot2D::exportDialogAccepted()
         if (line != "")
         {
             formatheader += line + "\r\n";
+
+            if (m_KmlExport) {
+                kmlExporter.processLine(line);
+            }
         }
     }
-    outputfile.write(formatheader.toLatin1());
+
+    if (!m_KmlExport) {
+        outputfile.write(formatheader.toLatin1());
+    }
 
     for (int i=0;i<m_tableModel->rowCount();i++)
     {
@@ -1624,7 +1655,14 @@ void AP2DataPlot2D::exportDialogAccepted()
             line += ", " + val.toString();
             val = m_tableModel->data(m_tableModel->index(i,j++));
         }
-        outputfile.write(line.append("\r\n").toLatin1());
+        if (m_KmlExport)
+        {
+            kmlExporter.processLine(line.append("\r\n"));
+        }
+        else
+        {
+            outputfile.write(line.append("\r\n").toLatin1());
+        }
         if (i % 5)
         {
             progressDialog->setValue(100.0 * ((double)i / (double)m_tableModel->rowCount()));
@@ -1641,13 +1679,22 @@ void AP2DataPlot2D::exportDialogAccepted()
         }
     }
 
-    outputfile.close();
+    if (m_KmlExport)
+    {
+        QString generated = kmlExporter.finish(true);
+
+        QString msg = QString("Generated %1.").arg(generated);
+        QMessageBox::information(this, "Log to KML", msg);
+    }
+    else
+    {
+        outputfile.close();
+    }
     progressDialog->hide();
     progressDialog->deleteLater();
     progressDialog=NULL;
 
     QLOG_DEBUG() << "Log export took " << timer1.elapsed() << "ms";
-
 }
 
 void AP2DataPlot2D::modeCheckBoxClicked(bool checked)
@@ -1879,8 +1926,8 @@ void AP2DataPlot2D::setupXAxisAndScroller()
 
     if (m_tableModel->canUseTimeOnX() && m_useTimeOnX)
     {
-        m_scrollStartIndex = m_tableModel->getMinTime() / c_timeDivisor;
-        m_scrollEndIndex = m_tableModel->getMaxTime() / c_timeDivisor;
+        m_scrollStartIndex = m_tableModel->getMinTime() / m_tableModel->getTimeDivisor();
+        m_scrollEndIndex = m_tableModel->getMaxTime() / m_tableModel->getTimeDivisor();
         xAxis->setNumberPrecision(2);
         xAxis->setLabel("Time s");
     }
@@ -1924,7 +1971,7 @@ void AP2DataPlot2D::insertTextArrows()
     // Iterate all elements and call their formatter to create output string
     foreach (MessageBase::Ptr p_msg, m_indexToMessageMap)
     {
-        double index = m_useTimeOnX ? p_msg->getTimeStamp() / c_timeDivisor : p_msg->getIndex();
+        double index = m_useTimeOnX ? p_msg->getTimeStamp() : p_msg->getIndex();
         QString string;
         switch (m_loadedLogMavType)
         {
